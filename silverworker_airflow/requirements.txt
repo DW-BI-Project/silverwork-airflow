@@ -1,4 +1,3 @@
-airflow
 pandas == 1.3.5
 numpy == 1.12.1
 oauth2client ==4.1.3
