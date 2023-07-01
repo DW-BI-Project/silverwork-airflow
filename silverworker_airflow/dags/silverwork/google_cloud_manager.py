@@ -1,4 +1,5 @@
 import gspread
+from airflow.models import Variable
 from oauth2client.service_account import ServiceAccountCredentials
 from google.cloud import storage, bigquery
 from google.oauth2 import service_account
@@ -9,10 +10,7 @@ class GoogleCloudManager:
         self.creadential_dict = creadential_dict
 
     def get_gspread_client(self, sheet_id):
-        scope = [
-            'https://spreadsheets.google.com/feeds',
-            'https://www.googleapis.com/auth/drive',
-        ]
+        scope = Variable.get("google_scope", deserialize_json=True)
         credentials = ServiceAccountCredentials.from_json_keyfile_dict(
             self.creadential_dict, scope)
         scope = scope

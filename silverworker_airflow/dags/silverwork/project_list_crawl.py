@@ -1,3 +1,4 @@
+from airflow.models import Variable
 import pandas as pd
 import numpy as np
 import requests
@@ -12,13 +13,10 @@ import time
 
 class ProjectDataProcessor:
     def __init__(self, credentials_dict):
-        self.scope = [
-            'https://spreadsheets.google.com/feeds',
-            'https://www.googleapis.com/auth/drive',
-        ]
+        self.scope = Variable.get("google_scope", deserialize_json=True)
         self.credentials_dict = credentials_dict
-        self.sheet_id = '1fLLCZaNY1Tu4J6mA4wwA59ON-KWYVmUE0u_cnCS4o7w'
-        self.gspread_url = 'https://docs.google.com/spreadsheets/d/{sheet_id}'
+        self.sheet_id = Variable.get('sheet_id')
+        self.gspread_url = 'https://docs.google.com/spreadsheets/d/{self.sheet_id}'
         self.columns = {
             '사업유형': 'projType',
             '사업번호': 'projNo',
@@ -52,7 +50,9 @@ class ProjectDataProcessor:
             '102CA': '조건부승인',
             '102AR': '심사요청'
         }
+
         self.adm_info = self.get_adm_info()
+
         self.common_code_info = self.csv_to_dataframe(
             sheet_name="한국노인인력개발원_취업연계_공통상세코드")
         self.proj_type_code_info = self.csv_to_dataframe(
@@ -62,16 +62,8 @@ class ProjectDataProcessor:
         df = pd.DataFrame()
         for sig_cd in range(1, 6):
             url = 'http://api.vworld.kr/req/data'
-            params = {
-                'request': 'GetFeature',
-                'key': '9FBC48F7-7677-368C-B8FB-E846BF6AECE3',
-                'size': 1000,
-                'data': 'LT_C_ADSIGG_INFO',
-                'attrfilter': f'sig_cd:like:{sig_cd}',
-                'columns': 'sig_cd,full_nm,sig_kor_nm',
-                'geometry': 'false'
-            }
-
+            params = {'request': 'GetFeature', 'key': Variable.get(
+                'vworld_key'), 'size': 1000, 'data': 'LT_C_ADSIGG_INFO', 'attrfilter': f'sig_cd:like:{sig_cd}', 'columns': 'sig_cd,full_nm,sig_kor_nm', 'geometry': 'false'}
             response = requests.get(url, params=params)
             content = response.content
             # byte decode
@@ -112,19 +104,25 @@ class ProjectDataProcessor:
                     return adm_dist_cd, adm_prov_nm, adm_dist_nm
         return None, None, adm_dist_nm
 
+    def contProjStartYear_transform(self, contProjStartYear):
+        if contProjStartYear is not None:
+            if '.0' in contProjStartYear:
+                contProjStartYear = contProjStartYear[:-2]
+                return contProjStartYear
+            else:
+                return contProjStartYear
+        else:
+            return None
+
     def csv_to_dataframe(self, sheet_name):
         try:
             # Google 스프레드시트에 접근하기 위한 인증 설정
-            scope = self.scope
-            credentials_dict = self.credentials_dict
             credentials = ServiceAccountCredentials.from_json_keyfile_dict(
-                credentials_dict, scope)
-            sheet_id = self.sheet_id
-            gspread_url = self.gspread_url
+                self.credentials_dict, self.scope)
             client = gspread.authorize(credentials)
 
             # Google 스프레드시트 문서 열기
-            spreadsheet = client.open('spreadsheet-copy-testing')
+            spreadsheet = client.open(Variable.get('spreadsheet_name'))
 
             data = spreadsheet.worksheet(sheet_name).get_all_values()
             return pd.DataFrame(data[1:], columns=data[0])
@@ -145,7 +143,7 @@ class ProjectDataProcessor:
             client = gspread.authorize(credentials)
 
             # Google 스프레드시트 문서 열기
-            spreadsheet = client.open('spreadsheet-copy-testing')
+            spreadsheet = client.open(Variable.get('spreadsheet_name'))
 
             worksheet = spreadsheet.worksheet(sheet_name)
 
@@ -213,7 +211,7 @@ class ProjectDataProcessor:
             return x
 
     def get_content(self, path, page='1', perPage='10'):
-        serviceKey = 'P%2FX6ClUCvMUQWPExEwMla81XkeORZDQJ4l1O6BHKt5R3c51%2BSTGqvZqe9luBBQNwhJiYx%2Fun2AoluaptvRv1gw%3D%3D'
+        serviceKey = Variable.get('encoding_key')
         url = 'https://api.odcloud.kr/api' + path + \
             f'?page={page}&perPage={perPage}&serviceKey={serviceKey}'
 
@@ -273,6 +271,9 @@ class ProjectDataProcessor:
                     if '계속사업시작연도' in data:
                         data.rename(
                             columns={'계속사업시작연도': '계속사업시작년도'}, inplace=True)
+                    if '사업유형상세' in data:
+                        data.rename(
+                            columns={'사업유형상세': '사업유형코드'}, inplace=True)
                     if '기관ID' in data:
                         data.rename(columns={'기관ID': '기관아이디'}, inplace=True)
                     if '특수사업코드' in data:
@@ -285,12 +286,14 @@ class ProjectDataProcessor:
 
         return df
 
+    def drop_duplicated_data(self, df):
+        df = df.drop_duplicates(['projNo'], keep='first')
+
+        return df
+
     def to_gspread(self, sheet_name, df):
         # 데이터프레임을 Google 스프레드시트에 저장하는 메서드
-        scope = [
-            'https://spreadsheets.google.com/feeds',
-            'https://www.googleapis.com/auth/drive',
-        ]
+        scope = self.scope
         credentials = ServiceAccountCredentials.from_json_keyfile_dict(
             self.credentials_dict, scope)
         sheet_id = self.sheet_id
@@ -305,30 +308,38 @@ class ProjectDataProcessor:
         if current_row == 0:
             header = df.columns.tolist()
             values = [header] + df.values.tolist()
-            sheet.clear()
-            sheet.update(values)
         else:
-            start_row = 0
-            start_row = current_row + 1
-            data_to_append = df.values.tolist()
-            sheet.insert_rows(data_to_append, start_row)
+            print(f"업데이트 전 데이터 수: {current_row}")
+            df_gs = pd.DataFrame(existing_data[1:], columns=existing_data[0])
+            df_gs = df_gs.append(df)
+            df_gs = self.drop_duplicated_data(df_gs)
+            header = df_gs.columns.tolist()
+            values = [header] + df_gs.values.tolist()
+            print(f"업데이트 후 데이터 수: {len(values)}")
 
+        sheet.clear()
+        sheet.update(values)
         print("Completed to update jobs to google spreadsheet!")
 
     def process_data(self):
-        scraper = ApiUrlCrawling.WebScraper()
-        scraper.initialize_driver()
-        paths = scraper.scrape_data(
-            'https://www.data.go.kr/data/15050148/fileData.do')
+        scraper = ApiUrlCrawling.WebScraper(Variable.get('scrap_url'))
+        paths = scraper.scrap_data()
         df = self.fetch_data(paths)
 
         # np.nan -> None으로 변경
         df = df.replace({np.nan: None})
 
         # 계속사업시작년도, 기관아이디 타입 변경 (object -> float)
-        df = df.astype({'계속사업시작년도': 'float', '기관아이디': 'float'},
-                       errors='ignore')
-        print("# 계속사업시작년도, 기관아이디 타입 변경 (object -> float) 변경 완료")
+
+        df['계속사업시작년도'].fillna(pd.NA)
+        df['계속사업시작년도'] = df['계속사업시작년도'].astype('str')
+        df['계속사업시작년도'] = df['계속사업시작년도'].apply(
+            lambda x: self.contProjStartYear_transform(x))
+        df['계속사업시작년도'] = df['계속사업시작년도'].where(pd.notnull(df['계속사업시작년도']), None)
+
+        df['계속사업시작년도'] = df['계속사업시작년도'].astype('str')
+        df['기관아이디'] = df['기관아이디'].astype('str')
+        print("# 계속사업시작년도, 기관아이디 타입 변경 (object -> str) 변경 완료")
 
         # 날짜 포맷 변경
         df['사업기간시작일'] = df['사업기간시작일'].apply(lambda x: self.date_format(x))
@@ -344,6 +355,7 @@ class ProjectDataProcessor:
         # '시군구코드', '관할시도명', '관할시군구'
         df[['시군구코드', '관할시도명', '관할시군구']] = df.apply(lambda x: self.find_adm_info(
             self.adm_info, x['관할시군구']), axis=1, result_type='expand')
+        df['시군구코드'] = df['시군구코드'].astype('str')
 
         # 사업계획서상태코드 변경
         df['사업계획서상태코드'] = df['사업계획서상태코드'].apply(
@@ -365,6 +377,6 @@ class ProjectDataProcessor:
             df = df[self.columns.values()]
 
             df = df.fillna('')
-
-            print(df)
-            self.to_gspread(sheet_name="projects", df=df)
+            df = self.drop_duplicated_data(df)
+            self.to_gspread(sheet_name=Variable.get(
+                'prjs_worksheet_name'), df=df)
