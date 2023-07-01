@@ -1,3 +1,4 @@
+from airflow.models import Variable
 import concurrent.futures
 import threading
 import time
@@ -23,11 +24,11 @@ class JobDetailCrawler:
                              'wantedTitle']
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         self.key = encoding_key
-        self.sheet_id = '1fLLCZaNY1Tu4J6mA4wwA59ON-KWYVmUE0u_cnCS4o7w'
+        self.sheet_id = Variable.get('sheet_id')
         self.credentials_dict = credentials_dict
         self.client = GCM.GoogleCloudManager(
             self.credentials_dict).get_gspread_client(self.sheet_id)
-        self.spreadsheet = self.client.open('spreadsheet-copy-testing')
+        self.spreadsheet = self.client.open(Variable.get('spreadsheet_name'))
 
     def process_api_request(self, url):
         worker_id = threading.get_ident()
@@ -61,9 +62,9 @@ class JobDetailCrawler:
         else:
             age = te.age.string.strip()
         if isinstance(te.ageLim, type(None)):
-            ageLim = ''
+            ageLim = 'N'
         else:
-            ageLim = te.ageLim.string.strip()
+            ageLim = 'Y'
         if isinstance(te.clerk, type(None)):
             clerk = ''
         else:
@@ -150,6 +151,10 @@ class JobDetailCrawler:
 
         print(str(worker_id) + ":::" + response.text[0:100])
 
+    def transform_process(self, df):
+        df['age'] = df['age'].astype(str)
+        df['clltPrnnum'] = df['clltPrnnum'].astype(str)
+
     def crawl(self):
         job_list_data = self.spreadsheet.worksheet(
             'job_list_crawl').get_all_values()
@@ -173,6 +178,7 @@ class JobDetailCrawler:
         with lock:
             if self.datas:
                 df = pd.DataFrame(self.datas, columns=self.columns_form)
+                self.transform_process(df)
                 worksheet = self.spreadsheet.worksheet('job_detail_crawl')
                 data = df.values.tolist()
                 header = df.columns.tolist()

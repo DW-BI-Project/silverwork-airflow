@@ -1,3 +1,4 @@
+from airflow.models import Variable
 import requests
 import bs4
 import time
@@ -11,26 +12,16 @@ class JobListCrawler:
         self.encoding_key = encoding_key
         self.credential_dict = credetial_dict
         self.datas = []
+        self.emplymShpNm_colums = {
+            'CM0101': '정규직',
+            'CM0102': '계약직',
+            'CM0103': '시간제일자리',
+            'CM0104': '일당직',
+            'CM0105': '기타'
+        }
 
     def crawl_job_list(self, pageNo, numOfRows):
         url = f'http://apis.data.go.kr/B552474/SenuriService/getJobList?serviceKey={self.encoding_key}&pageNo={pageNo}&numOfRows={numOfRows}'
-        while True:
-            try:
-                res = requests.get(url)
-
-                if res.status_code != 200:
-                    print('api 요청시 SERVICE ERROR 발생... 다시 요청중...')
-                    time.sleep(5)
-                    continue
-                else:
-                    break
-            except Exception as e:
-                print(e)
-                continue
-            break
-
-        xml_obj = bs4.BeautifulSoup(res.text, 'lxml-xml')
-        rows = xml_obj.findAll('item')
 
         while True:
             try:
@@ -43,11 +34,13 @@ class JobListCrawler:
                     time.sleep(5)
                     continue
                 else:
+                    print("요청 성공")
                     break
             except Exception as e:
                 print(e)
                 continue
             break
+
         yesterday = datetime.today() - timedelta(1)
         testday = yesterday.strftime('%Y%m%d')
 
@@ -74,17 +67,44 @@ class JobListCrawler:
                         jobclsNm, oranNm, organYn, recrtTitle, stmId, stmNm, toDd, workPlc, workPlcNm]
                 self.datas.append(data)
             else:
-                break
+                continue
+
+    def change_emplymShp(self, emplymShpNm):
+        emplymShpNm = self.emplymShpNm_colums[emplymShpNm]
+        return emplymShpNm
+
+    def change_date_format(self, Dd):
+        Dd = str(Dd)
+        return f'{Dd[:4]}-{Dd[4:6]}-{Dd[6:]}'
+
+    def drop_duplicated_data(self, df):
+        df = df.drop_duplicates(['jobId'], keep='first')
+
+        return df
+
+    def transform_process(self, df):
+        df['emplymShpNm'] = df['emplymShpNm'].apply(
+            lambda x: self.change_emplymShp(x))
+        df['frDd'] = df['frDd'].apply(
+            lambda x: self.change_date_format(x))
+        df['toDd'] = df['toDd'].apply(
+            lambda x: self.change_date_format(x))
+        df['workPlc'] = df['workPlc'].astype(str)
+        df = self.drop_duplicated_data(df)
+
+        return df
 
     def to_gspread(self, df):
+
+        df = self.transform_process(df)
         # Google 스프레드시트에 접근하기 위한 인증 설정
 
         manager = GCM.GoogleCloudManager(self.credential_dict)
-        sheet_id = '1fLLCZaNY1Tu4J6mA4wwA59ON-KWYVmUE0u_cnCS4o7w'
+        sheet_id = Variable.get('sheet_id')
         client = manager.get_gspread_client(sheet_id)
 
         # Google 스프레드시트 문서 열기
-        spreadsheet = client.open('spreadsheet-copy-testing')
+        spreadsheet = client.open(Variable.get('spreadsheet_name'))
 
         # DataFrame을 Google 스프레드시트로 보내기
         worksheet = spreadsheet.worksheet('job_list_crawl')
@@ -118,7 +138,7 @@ class JobListCrawler:
     def crawl(self):
 
         pageNo = 1
-        numOfRows = 200
+        numOfRows = 300
 
         self.crawl_job_list(pageNo, numOfRows)
 

@@ -1,3 +1,5 @@
+from airflow.models import Variable
+
 import gspread
 import pandas as pd
 from oauth2client.service_account import ServiceAccountCredentials
@@ -12,12 +14,13 @@ import silverwork.google_cloud_manager as GCM
 
 class GoogleSpreadsheetManager:
     def __init__(self, credentials_dict):
-        self.sheet_id = '1fLLCZaNY1Tu4J6mA4wwA59ON-KWYVmUE0u_cnCS4o7w'
+        self.sheet_id = Variable.get('sheet_id')
         self.credentials_dict = credentials_dict
         self.client = GCM.GoogleCloudManager(
             self.credentials_dict).get_gspread_client(self.sheet_id)
-        self.spreadsheet = self.client.open('spreadsheet-copy-testing')
-        self.worksheet = self.spreadsheet.worksheet('projects')
+        self.spreadsheet = self.client.open(Variable.get('spreadsheet_name'))
+        self.worksheet = self.spreadsheet.worksheet(
+            Variable.get('prjs_worksheet_name'))
 
     def get_data_from_spreadsheet(self):
         values = self.worksheet.get_all_values()
@@ -28,8 +31,8 @@ class GoogleSpreadsheetManager:
 
 class GoogleCloudStorageManager:
     def __init__(self, credentials_dict):
-        self.project_id = "speedy-octane-390814"
-        self.bucket_name = "silverwork-bucket"
+        self.project_id = Variable.get('project_id')
+        self.bucket_name = Variable.get('bucket_name')
         self.credentials_dict = credentials_dict
         credentials = service_account.Credentials.from_service_account_info(
             self.credentials_dict)
@@ -40,8 +43,8 @@ class GoogleCloudStorageManager:
         sheet_id = GoogleSpreadsheetManager(self.credentials_dict).sheet_id
         client = GCM.GoogleCloudManager(
             self.credentials_dict).get_gspread_client(sheet_id)
-        spreadsheet = client.open('spreadsheet-copy-testing')
-        worksheet = spreadsheet.worksheet('projects')
+        spreadsheet = client.open(Variable.get('spreadsheet_name'))
+        worksheet = spreadsheet.worksheet(Variable.get('prjs_worksheet_name'))
         values = worksheet.get_all_values()
 
         # Convert the 2D list to a pandas DataFrame
@@ -68,9 +71,9 @@ class GoogleCloudStorageManager:
 
 class BigQueryManager:
     def __init__(self, credentials_dict):
-        self.project_id = "speedy-octane-390814"
-        self.dataset_id = 'RAW_DATA'
-        self.table_id = 'PROJECTS_TEST'
+        self.project_id = Variable.get('project_id')
+        self.dataset_id = Variable.get('dataset_id')
+        self.table_id = Variable.get('prjs_table_id')
         self.credentials_dict = credentials_dict
         self.bigquery_client = GCM.GoogleCloudManager(
             self.credentials_dict).get_bigquery_client(self.project_id)
@@ -94,7 +97,7 @@ def load(credentials_dict):
 
     gcs_manager = GoogleCloudStorageManager(credentials_dict)
     storage_client = gcs_manager.storage_client
-    gcs_manager.export_sheet_to_csv("porjects_test.csv")
+    gcs_manager.export_sheet_to_csv(Variable.get('prjs_csv'))
 
     bigquery_manager = BigQueryManager(credentials_dict)
 
@@ -102,8 +105,8 @@ def load(credentials_dict):
     bigquery_table = bigquery_manager.table_id
 
     create_query = f"""
-    CREATE OR REPLACE TABLE `{bigquery_dataset}.{bigquery_table}` (
-        projType STRING NOT NULL,
+    create or replace table `{bigquery_dataset}.{bigquery_table}` (
+        projType string NOT NULL,
         projNo STRING NOT NULL,
         projPlanChangeNo INT64,
         projYear STRING NOT NULL,
@@ -133,7 +136,7 @@ def load(credentials_dict):
 
     # 구글 클라우드 버킷과 파일 정보
     bucket_name = gcs_manager.bucket_name  # 구글 클라우드 버킷 이름
-    file_name = "porjects_test.csv"  # 구글 클라우드 버킷에서 읽을 파일 이름
+    file_name = Variable.get('prjs_csv')  # 구글 클라우드 버킷에서 읽을 파일 이름
     dataset_id = bigquery_manager.dataset_id  # 구글 빅쿼리 데이터셋 ID
     table_id = bigquery_manager.table_id  # 구글 빅쿼리 테이블 ID
 
@@ -174,11 +177,11 @@ def load(credentials_dict):
         bigquery.SchemaField('delYn', 'STRING'),
         bigquery.SchemaField('sysCreatedAt', 'TIMESTAMP', mode='NULLABLE'),
     ]
-
     df['projPlanChangeNo'] = pd.to_numeric(df["projPlanChangeNo"])
     df['targetEmployment'] = pd.to_numeric(df["targetEmployment"])
 
-    df['sysCreatedAt'] = pd.Timestamp.now()
+    df['sysCreatedAt'] = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+    df['sysCreatedAt'] = df['sysCreatedAt'].astype('datetime64[s]')
     dataset_ref = bigquery_client.dataset(dataset_id)
     table_ref = dataset_ref.table(table_id)
 
