@@ -2,7 +2,7 @@ import unittest
 from unittest import mock
 from airflow.models import DagBag
 from datetime import datetime
-from dags.projects_crawling import ProjectListCrawl, GsheetToBigquery
+from projects_crawling import ProjectListCrawl, GsheetToBigquery
 
 
 class TestJobsCrawling(unittest.TestCase):
@@ -28,7 +28,7 @@ class TestJobsCrawling(unittest.TestCase):
         context = {'execution_date': execution_date}
 
         # Mock을 사용하여 의존성 모듈의 메서드를 가로채기
-        with mock.patch('silverwork.job_list_crawl.JobListCrawler') as mock_crawler:
+        with mock.patch('silverwork.project_list_crawl.ProjectDataProcessor') as mock_crawler:
             # 실행
             task.execute(context=context)
 
@@ -47,7 +47,7 @@ class TestJobsCrawling(unittest.TestCase):
         context = {'execution_date': execution_date}
 
         # Mock을 사용하여 의존성 모듈의 메서드를 가로채기
-        with mock.patch('silverwork.job_detail_crawl.JobDetailCrawler') as mock_crawler:
+        with mock.patch('silverwork.projects_gsheet_to_bigquery.load') as mock_crawler:
             # 실행
             task.execute(context=context)
 
