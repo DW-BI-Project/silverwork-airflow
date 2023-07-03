@@ -2,6 +2,7 @@ from airflow import DAG
 from utils.alert import SlackAlert
 from airflow.models import Variable
 from airflow.operators.python import PythonOperator
+from airflow.models import Variable
 
 from datetime import datetime
 import pendulum
