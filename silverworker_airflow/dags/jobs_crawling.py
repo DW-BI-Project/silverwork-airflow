@@ -1,19 +1,10 @@
 from airflow import DAG
-from utils.alert import SlackAlert
 from airflow.models import Variable
 from airflow.operators.python import PythonOperator
 
 from datetime import datetime
 import pendulum
 
-alert = SlackAlert('#airflow-alert')
-
-default_args = {
-    'owner': 'yaNam',
-    'email': ['nyah309@gmail.com'],
-    'on_success_callback': alert.slack_success_alert,
-    'on_failure_callback': alert.slack_failure_alert,
-}
 
 
 def JobListCrawl():
@@ -60,7 +51,6 @@ dag = DAG(
     start_date=pendulum.datetime(2023, 6, 28, tz="Asia/Seoul"),
     catchup=False,
     max_active_runs=1,
-    default_args=default_args,
 )
 
 
