@@ -29,7 +29,7 @@ def dbt_task(task: str) -> KubernetesPodOperator:
 
 with DAG('dbt_workflow',
          start_date=datetime(2023, 1, 1),
-         schedule_interval='@daily',
+         schedule='0 10 * * *',
          tags=["DBT", "Data"],
          default_args={
              'on_success_callback': alert.slack_success_alert,
